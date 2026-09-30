@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 from groq import Groq
+import streamlit as st
+
 
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -13,7 +15,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 load_dotenv()
 
 client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
+    api_key=st.secrets["GROQ_API_KEY"]
 )
 
 # ----------------------------
