@@ -1,3 +1,10 @@
+streamlit
+pandas
+numpy
+scikit-learn
 joblib
 python-dotenv
 groq
+langchain
+langchain-community
+faiss-cpu
