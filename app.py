@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import joblib
@@ -5,7 +6,7 @@ import os
 
 from dotenv import load_dotenv
 from groq import Groq
-
+from huggingface_hub import hf_hub_download
 from rag.chatbot import ask_loan_assistant
 
 # --------------------------------
@@ -25,16 +26,59 @@ st.set_page_config(
 load_dotenv()
 
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
+def get_secret(key):
+    if key in st.secrets:
+        return st.secrets[key]
+    return os.getenv(key)
+
+
+groq_api_key = get_secret("GROQ_API_KEY")
+
+if not groq_api_key:
+    st.error("GROQ_API_KEY is missing. Configure it in Streamlit Secrets.")
+    st.stop()
+
+client = Groq(api_key=groq_api_key)
 
 # --------------------------------
-# Load Model
+# Load Model from Hugging Face
 # --------------------------------
 
-model = joblib.load("models/random_forest.pkl")
-preprocessor = joblib.load("models/preprocessor.pkl")
+@st.cache_resource
+def load_models():
+    hf_token = get_secret("HF_TOKEN")
+
+    if not hf_token:
+        raise ValueError(
+            "HF_TOKEN is missing. Add it to Streamlit Cloud Secrets."
+        )
+
+    model_path = hf_hub_download(
+        repo_id="PavanKarthik/loan-risk-model",
+        filename="random_forest.pkl",
+        repo_type="model",
+        token=hf_token
+    )
+
+    preprocessor_path = hf_hub_download(
+        repo_id="PavanKarthik/loan-risk-model",
+        filename="preprocessor.pkl",
+        repo_type="model",
+        token=hf_token
+    )
+
+    model = joblib.load(model_path)
+    preprocessor = joblib.load(preprocessor_path)
+
+    return model, preprocessor
+
+
+try:
+    model, preprocessor = load_models()
+except Exception as e:
+    st.error("Unable to load the model files from Hugging Face.")
+    st.code(str(e))
+    st.stop()
 
 # --------------------------------
 # Sidebar
@@ -42,39 +86,37 @@ preprocessor = joblib.load("models/preprocessor.pkl")
 
 st.sidebar.title("📋 Project Information")
 
-
-tab1, tab2 = st.tabs([
-    "🏦 Loan Prediction",
-    "🤖 Loan Assistant"
-])
-
-
-
 st.sidebar.write("**Model:** Random Forest")
 st.sidebar.write("**Problem Type:** Binary Classification")
 st.sidebar.write("**Dataset Size:** 593,994 Records")
 st.sidebar.write("**Target:** Loan Repayment Prediction")
 
 # --------------------------------
-# Title
+# Tabs
 # --------------------------------
+
+tab1, tab2 = st.tabs([
+    "🏦 Loan Prediction",
+    "🤖 Loan Assistant"
+])
+
+# --------------------------------
+# Loan Prediction
+# --------------------------------
+
 with tab1:
     st.title("🏦 AI Loan Risk Assessment System")
 
     st.markdown("""
-    This application predicts whether a customer is likely to repay a loan using a trained **Random Forest Machine Learning model**.
+    This application predicts whether a customer is likely to repay a loan
+    using a trained **Random Forest Machine Learning model**.
     """)
 
     st.write("Enter the customer details below and click **Predict**.")
 
-    # --------------------------------
-    # User Inputs
-    # --------------------------------
-
     col1, col2 = st.columns(2)
 
     with col1:
-
         annual_income = st.number_input(
             "Annual Income",
             min_value=0.0
@@ -102,7 +144,6 @@ with tab1:
         )
 
     with col2:
-
         credit_score = st.number_input(
             "Credit Score",
             min_value=300,
@@ -144,13 +185,13 @@ with tab1:
     grade_subgrade = st.selectbox(
         "Loan Grade",
         [
-            "A1","A2","A3","A4","A5",
-            "B1","B2","B3","B4","B5",
-            "C1","C2","C3","C4","C5",
-            "D1","D2","D3","D4","D5",
-            "E1","E2","E3","E4","E5",
-            "F1","F2","F3","F4","F5",
-            "G1","G2","G3","G4","G5"
+            "A1", "A2", "A3", "A4", "A5",
+            "B1", "B2", "B3", "B4", "B5",
+            "C1", "C2", "C3", "C4", "C5",
+            "D1", "D2", "D3", "D4", "D5",
+            "E1", "E2", "E3", "E4", "E5",
+            "F1", "F2", "F3", "F4", "F5",
+            "G1", "G2", "G3", "G4", "G5"
         ]
     )
 
@@ -161,7 +202,6 @@ with tab1:
     if st.button("🔍 Predict"):
 
         input_data = pd.DataFrame({
-
             "annual_income": [annual_income],
             "debt_to_income_ratio": [debt_to_income_ratio],
             "credit_score": [credit_score],
@@ -173,19 +213,16 @@ with tab1:
             "employment_status": [employment_status],
             "loan_purpose": [loan_purpose],
             "grade_subgrade": [grade_subgrade]
-
         })
 
         processed_data = preprocessor.transform(input_data)
 
         prediction = model.predict(processed_data)
-
         probability = model.predict_proba(processed_data)
 
         confidence = probability[0][1] * 100
 
         st.divider()
-
         st.subheader("📊 Prediction Result")
 
         if prediction[0] == 1:
@@ -194,11 +231,17 @@ with tab1:
             st.error("❌ High Risk of Default")
 
         st.subheader("Confidence")
-
         st.progress(int(confidence))
 
-        st.write(f"**Probability of Loan Paid Back:** {probability[0][1]*100:.2f}%")
-        st.write(f"**Probability of Loan Default:** {probability[0][0]*100:.2f}%")
+        st.write(
+            f"**Probability of Loan Paid Back:** "
+            f"{probability[0][1] * 100:.2f}%"
+        )
+        st.write(
+            f"**Probability of Loan Default:** "
+            f"{probability[0][0] * 100:.2f}%"
+        )
+
         # --------------------------------
         # Risk Level
         # --------------------------------
@@ -207,13 +250,10 @@ with tab1:
 
         if confidence >= 85:
             st.success("🟢 Low Risk")
-
         elif confidence >= 60:
             st.warning("🟡 Medium Risk")
-
         else:
             st.error("🔴 High Risk")
-
 
         # --------------------------------
         # Recommendation
@@ -222,35 +262,30 @@ with tab1:
         st.subheader("🏦 Recommendation")
 
         if confidence >= 85:
-
             st.success("""
-        ### Approve Loan
+            ### Approve Loan
 
-        Reason:
-        - Strong repayment probability
-        - Low risk customer
-        - Financial profile appears stable
-        """)
-
+            Reason:
+            - Strong repayment probability
+            - Low risk customer
+            - Financial profile appears stable
+            """)
         elif confidence >= 60:
-
             st.warning("""
-        ### Review Application
+            ### Review Application
 
-        Reason:
-        - Medium repayment probability
-        - Additional document verification is recommended
-        """)
-
+            Reason:
+            - Medium repayment probability
+            - Additional document verification is recommended
+            """)
         else:
-
             st.error("""
-        ### Reject / Manual Review
+            ### Reject / Manual Review
 
-        Reason:
-        - High default probability
-        - Customer needs further financial assessment
-        """)
+            Reason:
+            - High default probability
+            - Customer needs further financial assessment
+            """)
 
         # --------------------------------
         # AI Explanation
@@ -299,22 +334,31 @@ with tab1:
         ### Recommendation
         """
 
-        response = client.chat.completions.create(
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
 
-            model="llama-3.3-70b-versatile",
+            st.write(response.choices[0].message.content)
 
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
+        except Exception as e:
+            st.warning(
+                "The prediction succeeded, but the AI explanation "
+                "could not be generated."
+            )
+            st.caption(str(e))
 
-        )
+# --------------------------------
+# Loan Assistant
+# --------------------------------
 
-        st.write(response.choices[0].message.content)
 with tab2:
-
     st.header("🤖 Loan Assistant")
 
     question = st.text_input("Ask any loan related question")
@@ -322,12 +366,12 @@ with tab2:
     if st.button("Ask Assistant"):
 
         if question.strip():
-
             with st.spinner("Searching knowledge base..."):
-
-                answer = ask_loan_assistant(question)
-
-            st.write(answer)
-
+                try:
+                    answer = ask_loan_assistant(question)
+                    st.write(answer)
+                except Exception as e:
+                    st.error("Unable to get an answer from the Loan Assistant.")
+                    st.caption(str(e))
         else:
             st.warning("Please enter a question.")
