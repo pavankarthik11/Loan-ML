@@ -7,7 +7,6 @@ import os
 from dotenv import load_dotenv
 from groq import Groq
 from huggingface_hub import hf_hub_download
-from rag.chatbot import ask_loan_assistant
 
 # --------------------------------
 # Page Configuration
@@ -27,18 +26,25 @@ load_dotenv()
 
 
 def get_secret(key):
-    if key in st.secrets:
-        return st.secrets[key]
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+
     return os.getenv(key)
 
 
+# --------------------------------
+# Groq Client
+# --------------------------------
+
 groq_api_key = get_secret("GROQ_API_KEY")
 
-if not groq_api_key:
-    st.error("GROQ_API_KEY is missing. Configure it in Streamlit Secrets.")
-    st.stop()
+client = None
 
-client = Groq(api_key=groq_api_key)
+if groq_api_key:
+    client = Groq(api_key=groq_api_key)
 
 # --------------------------------
 # Load Model from Hugging Face
@@ -75,6 +81,7 @@ def load_models():
 
 try:
     model, preprocessor = load_models()
+
 except Exception as e:
     st.error("Unable to load the model files from Hugging Face.")
     st.code(str(e))
@@ -113,6 +120,10 @@ with tab1:
     """)
 
     st.write("Enter the customer details below and click **Predict**.")
+
+    # --------------------------------
+    # User Inputs
+    # --------------------------------
 
     col1, col2 = st.columns(2)
 
@@ -237,6 +248,7 @@ with tab1:
             f"**Probability of Loan Paid Back:** "
             f"{probability[0][1] * 100:.2f}%"
         )
+
         st.write(
             f"**Probability of Loan Default:** "
             f"{probability[0][0] * 100:.2f}%"
@@ -270,6 +282,7 @@ with tab1:
             - Low risk customer
             - Financial profile appears stable
             """)
+
         elif confidence >= 60:
             st.warning("""
             ### Review Application
@@ -278,6 +291,7 @@ with tab1:
             - Medium repayment probability
             - Additional document verification is recommended
             """)
+
         else:
             st.error("""
             ### Reject / Manual Review
@@ -293,66 +307,73 @@ with tab1:
 
         st.subheader("🤖 AI Explanation")
 
-        prompt = f"""
-        You are an AI assistant helping a bank loan officer.
-
-        Customer Details:
-
-        Annual Income: {annual_income}
-        Debt to Income Ratio: {debt_to_income_ratio}
-        Credit Score: {credit_score}
-        Loan Amount: {loan_amount}
-        Interest Rate: {interest_rate}
-        Gender: {gender}
-        Marital Status: {marital_status}
-        Education Level: {education_level}
-        Employment Status: {employment_status}
-        Loan Purpose: {loan_purpose}
-        Loan Grade: {grade_subgrade}
-
-        Prediction:
-        {"Loan is likely to be Paid Back" if prediction[0] == 1 else "High Risk of Default"}
-
-        Confidence:
-        {confidence:.2f}%
-
-        Instructions:
-        - Do not assume any currency.
-        - Do not invent any facts.
-        - Use only the information provided.
-        - Explain in simple English.
-        - Keep the response under 120 words.
-
-        Return your answer using this format:
-
-        ### Summary
-
-        ### Positive Factors
-
-        ### Possible Concerns
-
-        ### Recommendation
-        """
-
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            )
-
-            st.write(response.choices[0].message.content)
-
-        except Exception as e:
+        if client is None:
             st.warning(
-                "The prediction succeeded, but the AI explanation "
-                "could not be generated."
+                "GROQ_API_KEY is missing. Add it to Streamlit Cloud Secrets "
+                "to enable AI explanations."
             )
-            st.caption(str(e))
+
+        else:
+            prompt = f"""
+            You are an AI assistant helping a bank loan officer.
+
+            Customer Details:
+
+            Annual Income: {annual_income}
+            Debt to Income Ratio: {debt_to_income_ratio}
+            Credit Score: {credit_score}
+            Loan Amount: {loan_amount}
+            Interest Rate: {interest_rate}
+            Gender: {gender}
+            Marital Status: {marital_status}
+            Education Level: {education_level}
+            Employment Status: {employment_status}
+            Loan Purpose: {loan_purpose}
+            Loan Grade: {grade_subgrade}
+
+            Prediction:
+            {"Loan is likely to be Paid Back" if prediction[0] == 1 else "High Risk of Default"}
+
+            Confidence:
+            {confidence:.2f}%
+
+            Instructions:
+            - Do not assume any currency.
+            - Do not invent any facts.
+            - Use only the information provided.
+            - Explain in simple English.
+            - Keep the response under 120 words.
+
+            Return your answer using this format:
+
+            ### Summary
+
+            ### Positive Factors
+
+            ### Possible Concerns
+
+            ### Recommendation
+            """
+
+            try:
+                response = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                )
+
+                st.write(response.choices[0].message.content)
+
+            except Exception as e:
+                st.warning(
+                    "The prediction succeeded, but the AI explanation "
+                    "could not be generated."
+                )
+                st.caption(str(e))
 
 # --------------------------------
 # Loan Assistant
@@ -366,12 +387,20 @@ with tab2:
     if st.button("Ask Assistant"):
 
         if question.strip():
+
             with st.spinner("Searching knowledge base..."):
                 try:
+                    # Import the chatbot only when it is requested.
+                    from rag.chatbot import ask_loan_assistant
+
                     answer = ask_loan_assistant(question)
                     st.write(answer)
+
                 except Exception as e:
-                    st.error("Unable to get an answer from the Loan Assistant.")
+                    st.error(
+                        "Unable to get an answer from the Loan Assistant."
+                    )
                     st.caption(str(e))
+
         else:
             st.warning("Please enter a question.")
